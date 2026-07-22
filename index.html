@@ -1,0 +1,375 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Heart Rate Monitor</title>
+<style>
+  :root{
+    --bg:#0f1220; --card:#1a1f36; --line:#2a3152;
+    --text:#e8ebff; --muted:#8b93b8;
+    --bpm:#ff4d6d; --spo2:#38bdf8; --ok:#34d399; --warn:#fbbf24;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{
+    font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
+    background:radial-gradient(1200px 600px at 50% -10%,#1b2140,#0f1220);
+    color:var(--text);min-height:100vh;
+    display:flex;flex-direction:column;align-items:center;
+    padding:24px;
+  }
+  h1{font-size:1.4rem;font-weight:600;margin-bottom:4px;letter-spacing:.3px}
+  .sub{color:var(--muted);font-size:.85rem;margin-bottom:22px}
+  button{
+    background:var(--bpm);color:#fff;border:0;border-radius:12px;
+    padding:12px 26px;font-size:1rem;font-weight:600;cursor:pointer;
+    transition:transform .1s ease,opacity .2s;
+  }
+  button:hover{transform:translateY(-1px)}
+  button:disabled{opacity:.4;cursor:not-allowed;transform:none}
+  button.disconnect{background:var(--line)}
+  .status{
+    margin:18px 0 24px;font-size:.9rem;color:var(--muted);
+    display:flex;align-items:center;gap:8px;
+  }
+  .dot{width:10px;height:10px;border-radius:50%;background:#555;transition:background .3s}
+  .dot.on{background:var(--ok);box-shadow:0 0 10px var(--ok)}
+  .cards{display:flex;gap:18px;flex-wrap:wrap;justify-content:center;width:100%;max-width:640px}
+  .card{
+    background:var(--card);border:1px solid var(--line);border-radius:20px;
+    padding:26px 30px;flex:1 1 240px;text-align:center;position:relative;overflow:hidden;
+  }
+  .card .label{color:var(--muted);font-size:.8rem;text-transform:uppercase;letter-spacing:1px}
+  .card .value{font-size:4rem;font-weight:700;line-height:1;margin:10px 0 2px}
+  .card .unit{color:var(--muted);font-size:.9rem}
+  .card.bpm .value{color:var(--bpm)}
+  .card.spo2 .value{color:var(--spo2)}
+  .heart{position:absolute;top:16px;right:18px;font-size:1.3rem;opacity:.85}
+  .beat{animation:beat .8s ease-in-out infinite}
+  @keyframes beat{0%,100%{transform:scale(1)}15%{transform:scale(1.28)}30%{transform:scale(1)}}
+  .banner{
+    margin-top:22px;width:100%;max-width:640px;background:var(--card);
+    border:1px solid var(--line);border-radius:14px;padding:14px 18px;
+    color:var(--muted);font-size:.9rem;text-align:center;min-height:50px;
+    display:flex;align-items:center;justify-content:center;gap:10px;
+  }
+  .bar{height:8px;background:var(--line);border-radius:6px;overflow:hidden;margin-top:8px}
+  .bar>i{display:block;height:100%;width:0;background:var(--warn);transition:width .3s}
+  .chartCard{
+    margin-top:18px;width:100%;max-width:640px;background:var(--card);
+    border:1px solid var(--line);border-radius:20px;padding:16px 18px 10px;
+  }
+  .chartHead{
+    display:flex;justify-content:space-between;align-items:center;
+    margin-bottom:8px;flex-wrap:wrap;gap:8px;
+  }
+  .legend{display:flex;gap:14px;font-size:.78rem;color:var(--muted)}
+  .legend span{display:flex;align-items:center;gap:6px}
+  .swatch{width:14px;height:3px;border-radius:2px;display:inline-block}
+  .stats{font-size:.75rem;color:var(--muted);font-variant-numeric:tabular-nums}
+  #chart{width:100%;height:180px;display:block}
+  .note{color:var(--muted);font-size:.75rem;margin-top:26px;max-width:520px;text-align:center;line-height:1.5}
+</style>
+</head>
+<body>
+  <h1>❤️ Heart Rate Monitor</h1>
+  <div class="sub">MAX30102 · XIAO ESP32C3 · Web Bluetooth</div>
+
+  <button id="connectBtn">Connect device</button>
+
+  <div class="status"><span class="dot" id="dot"></span><span id="statusText">Not connected</span></div>
+
+  <div class="cards">
+    <div class="card bpm">
+      <span class="heart" id="heart">❤️</span>
+      <div class="label">Heart Rate</div>
+      <div class="value" id="bpm">--</div>
+      <div class="unit">BPM</div>
+    </div>
+    <div class="card spo2">
+      <div class="label">Blood Oxygen</div>
+      <div class="value" id="spo2">--</div>
+      <div class="unit">% SpO₂</div>
+    </div>
+  </div>
+
+  <div class="banner" id="banner">
+    <div style="width:100%">
+      <div id="bannerText">Click “Connect device”, then place your finger on the sensor.</div>
+      <div class="bar" id="barWrap" style="display:none"><i id="bar"></i></div>
+    </div>
+  </div>
+
+  <div class="chartCard">
+    <div class="chartHead">
+      <div class="legend">
+        <span><i class="swatch" style="background:var(--bpm)"></i>BPM</span>
+        <span><i class="swatch" style="background:var(--spo2)"></i>SpO₂</span>
+      </div>
+      <div class="stats" id="stats">no data yet</div>
+    </div>
+    <canvas id="chart"></canvas>
+  </div>
+
+  <div class="note">
+    Requires Chrome or Edge on desktop or Android, with Bluetooth on.
+    In the chooser select <b>XIAO-HeartRate</b>.
+    <b>Not supported on iPhone/iPad</b> — Safari and iOS browsers have no Web Bluetooth.
+    Readings are for wellness/experimentation only, not a medical device.
+  </div>
+
+<script>
+// Custom UUIDs -- must match the firmware exactly.
+// Not the standard 0x180D heart-rate service, so only this board is listed.
+const SERVICE_UUID = "7a2f8c10-4b3e-4f6a-9d21-5c8e1b7f30a4";
+const CHAR_UUID    = "7a2f8c11-4b3e-4f6a-9d21-5c8e1b7f30a4";
+const DEVICE_NAME  = "XIAO-HeartRate";
+
+const connectBtn = document.getElementById('connectBtn');
+const dot        = document.getElementById('dot');
+const statusText = document.getElementById('statusText');
+const bpmEl      = document.getElementById('bpm');
+const spo2El     = document.getElementById('spo2');
+const heartEl    = document.getElementById('heart');
+const bannerText = document.getElementById('bannerText');
+const barWrap    = document.getElementById('barWrap');
+const bar        = document.getElementById('bar');
+
+let device = null, characteristic = null;
+
+// ---------------------------------------------------------------- chart
+// Rolling trace of the most recent readings. A value of 0 means "no valid
+// reading" (finger off / calibrating) and is drawn as a gap, not a zero dip.
+const MAX_POINTS = 90;
+const hist = [];                       // [{bpm, spo2}, ...]
+const SPO2_LO = 88, SPO2_HI = 100;     // fixed SpO2 axis -- the useful range
+
+const canvas  = document.getElementById('chart');
+const ctx     = canvas.getContext('2d');
+const statsEl = document.getElementById('stats');
+
+function pushHistory(bpm, spo2) {
+  hist.push({ bpm: bpm > 0 ? bpm : 0, spo2: spo2 > 0 ? spo2 : 0 });
+  if (hist.length > MAX_POINTS) hist.shift();
+  drawChart();
+  updateStats();
+}
+
+function updateStats() {
+  const vals = hist.map(p => p.bpm).filter(v => v > 0);
+  if (!vals.length) { statsEl.textContent = "no data yet"; return; }
+  const min = Math.min(...vals);
+  const max = Math.max(...vals);
+  const avg = Math.round(vals.reduce((a, b) => a + b, 0) / vals.length);
+  statsEl.textContent = `min ${min} · avg ${avg} · max ${max} BPM · ${vals.length} readings`;
+}
+
+// Map a series to canvas coords and stroke it, breaking the line at gaps.
+function strokeSeries(get, lo, hi, color, geom) {
+  const { padL, padT, plotW, plotH } = geom;
+  const stepX = plotW / (MAX_POINTS - 1);
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 2;
+  ctx.lineJoin = ctx.lineCap = 'round';
+  ctx.beginPath();
+  let drawing = false;
+  hist.forEach((p, i) => {
+    const v = get(p);
+    if (!v) { drawing = false; return; }          // gap -- lift the pen
+    const x = padL + i * stepX;
+    const y = padT + plotH - ((v - lo) / (hi - lo)) * plotH;
+    if (drawing) ctx.lineTo(x, y);
+    else { ctx.moveTo(x, y); drawing = true; }
+  });
+  ctx.stroke();
+
+  // dot on the most recent valid point
+  for (let i = hist.length - 1; i >= 0; i--) {
+    const v = get(hist[i]);
+    if (v) {
+      const x = padL + i * stepX;
+      const y = padT + plotH - ((v - lo) / (hi - lo)) * plotH;
+      ctx.fillStyle = color;
+      ctx.beginPath(); ctx.arc(x, y, 3.5, 0, Math.PI * 2); ctx.fill();
+      break;
+    }
+  }
+}
+
+function drawChart() {
+  // size the backing store to the device pixel ratio so lines stay crisp
+  const dpr = window.devicePixelRatio || 1;
+  const w = canvas.clientWidth, h = canvas.clientHeight;
+  if (!w || !h) return;
+  canvas.width = w * dpr; canvas.height = h * dpr;
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, w, h);
+
+  const padL = 32, padR = 34, padT = 12, padB = 16;
+  const plotW = w - padL - padR, plotH = h - padT - padB;
+  const geom = { padL, padT, plotW, plotH };
+
+  // BPM axis auto-scales to the data, with padding and a sane minimum span
+  const bpmVals = hist.map(p => p.bpm).filter(v => v > 0);
+  let bLo = 55, bHi = 95;
+  if (bpmVals.length) {
+    bLo = Math.min(...bpmVals) - 8;
+    bHi = Math.max(...bpmVals) + 8;
+    if (bHi - bLo < 25) { const m = (bLo + bHi) / 2; bLo = m - 12.5; bHi = m + 12.5; }
+  }
+
+  const css = getComputedStyle(document.documentElement);
+  const lineCol  = css.getPropertyValue('--line').trim();
+  const mutedCol = css.getPropertyValue('--muted').trim();
+  const bpmCol   = css.getPropertyValue('--bpm').trim();
+  const spo2Col  = css.getPropertyValue('--spo2').trim();
+
+  // grid + axis labels (BPM left, SpO2 right)
+  ctx.font = '10px system-ui, sans-serif';
+  ctx.textBaseline = 'middle';
+  for (let i = 0; i <= 3; i++) {
+    const y = padT + (plotH * i) / 3;
+    ctx.strokeStyle = lineCol; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(padL, y); ctx.lineTo(padL + plotW, y); ctx.stroke();
+
+    ctx.fillStyle = mutedCol;
+    ctx.textAlign = 'right';
+    ctx.fillText(Math.round(bHi - ((bHi - bLo) * i) / 3), padL - 6, y);
+    ctx.textAlign = 'left';
+    ctx.fillText(Math.round(SPO2_HI - ((SPO2_HI - SPO2_LO) * i) / 3), padL + plotW + 6, y);
+  }
+
+  if (!hist.length) {
+    ctx.fillStyle = mutedCol; ctx.textAlign = 'center';
+    ctx.fillText('waiting for readings…', padL + plotW / 2, padT + plotH / 2);
+    return;
+  }
+
+  strokeSeries(p => p.spo2, SPO2_LO, SPO2_HI, spo2Col, geom);
+  strokeSeries(p => p.bpm,  bLo,     bHi,     bpmCol,  geom);
+}
+
+window.addEventListener('resize', drawChart);
+drawChart();
+
+connectBtn.addEventListener('click', () => {
+  if (device && device.gatt.connected) disconnect();
+  else connect();
+});
+
+async function connect() {
+  // Web Bluetooth requires a secure context: https:// or http://localhost.
+  // Opening the file directly (file://) will NOT work.
+  if (!window.isSecureContext || location.protocol === 'file:') {
+    bannerText.innerHTML =
+      "⚠️ <b>This page must be served over https:// or http://localhost</b><br>" +
+      "Web Bluetooth is blocked on file:// URLs.";
+    statusText.textContent = "Blocked: insecure origin";
+    return;
+  }
+  if (!navigator.bluetooth) {
+    bannerText.textContent =
+      "Web Bluetooth is not supported here. Use Chrome or Edge on desktop or Android.";
+    statusText.textContent = "Not supported";
+    return;
+  }
+  try {
+    hist.length = 0;                     // fresh trace for each session
+    drawChart(); updateStats();
+    statusText.textContent = "Requesting device…";
+    // Match on the advertised service UUID or the device name -- either works.
+    device = await navigator.bluetooth.requestDevice({
+      filters: [{ services: [SERVICE_UUID] }, { name: DEVICE_NAME }],
+      optionalServices: [SERVICE_UUID]
+    });
+    device.addEventListener('gattserverdisconnected', onDisconnected);
+
+    statusText.textContent = "Connecting…";
+    const server  = await device.gatt.connect();
+    const service = await server.getPrimaryService(SERVICE_UUID);
+    characteristic = await service.getCharacteristic(CHAR_UUID);
+
+    await characteristic.startNotifications();
+    characteristic.addEventListener('characteristicvaluechanged', onData);
+
+    dot.classList.add('on');
+    statusText.textContent = "Connected";
+    connectBtn.textContent = "Disconnect";
+    connectBtn.classList.add('disconnect');
+  } catch (e) {
+    console.error(e);
+    statusText.textContent = "Connection failed";
+    if (e.name === "NotFoundError") {
+      bannerText.textContent =
+        "No device chosen, or " + DEVICE_NAME + " wasn't found. Make sure the board " +
+        "is powered, not already connected elsewhere, and Bluetooth is on.";
+    } else if (e.name === "SecurityError") {
+      bannerText.textContent = "Blocked by the browser — the page must be on https:// or localhost.";
+    } else {
+      bannerText.textContent = e.name + ": " + e.message;
+    }
+  }
+}
+
+function disconnect() {
+  if (device && device.gatt.connected) device.gatt.disconnect();
+}
+
+function onDisconnected() {
+  dot.classList.remove('on');
+  statusText.textContent = "Disconnected";
+  connectBtn.textContent = "Connect device";
+  connectBtn.classList.remove('disconnect');
+  bpmEl.textContent = "--";
+  spo2El.textContent = "--";
+  heartEl.classList.remove('beat');
+  barWrap.style.display = "none";
+  bannerText.textContent = "Device disconnected.";
+}
+
+function onData(event) {
+  const text = new TextDecoder().decode(event.target.value);
+  let d;
+  try { d = JSON.parse(text); } catch { return; }
+  render(d);
+}
+
+function render(d) {
+  switch (d.status) {
+    case "nofinger":
+      bpmEl.textContent = "--";
+      spo2El.textContent = "--";
+      heartEl.classList.remove('beat');
+      barWrap.style.display = "none";
+      bannerText.textContent = "👆 Place your finger gently on the sensor.";
+      pushHistory(0, 0);          // records a gap in the trace
+      break;
+
+    case "calibrating":
+      bpmEl.textContent = "--";
+      spo2El.textContent = "--";
+      heartEl.classList.remove('beat');
+      barWrap.style.display = "block";
+      bar.style.width = (d.progress || 0) + "%";
+      bannerText.textContent = "Calibrating… hold still (" + (d.progress || 0) + "%)";
+      break;
+
+    case "ready":
+      bpmEl.textContent  = d.bpm  > 0 ? d.bpm  : "--";
+      spo2El.textContent = d.spo2 > 0 ? d.spo2 : "--";
+      barWrap.style.display = "none";
+      bannerText.textContent = "✅ Reading — keep your finger still.";
+      if (d.bpm > 0) {
+        heartEl.classList.add('beat');
+        // sync heartbeat animation speed to the measured BPM
+        heartEl.style.animationDuration = (60 / d.bpm).toFixed(2) + "s";
+      } else {
+        heartEl.classList.remove('beat');
+      }
+      pushHistory(d.bpm, d.spo2);
+      break;
+  }
+}
+</script>
+</body>
+</html>
