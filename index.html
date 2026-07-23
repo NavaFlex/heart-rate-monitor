@@ -95,7 +95,7 @@
 
   <div class="banner" id="banner">
     <div style="width:100%">
-      <div id="bannerText">Click “Connect device”</div>
+      <div id="bannerText">Click “Connect device”, then place your finger on the sensor.</div>
       <div class="bar" id="barWrap" style="display:none"><i id="bar"></i></div>
     </div>
   </div>
@@ -289,8 +289,18 @@ async function connect() {
     const service = await server.getPrimaryService(SERVICE_UUID);
     characteristic = await service.getCharacteristic(CHAR_UUID);
 
-    await characteristic.startNotifications();
     characteristic.addEventListener('characteristicvaluechanged', onData);
+    await characteristic.startNotifications();
+
+    // Pull one value immediately so we get a reading even before the first
+    // notification, and to prove data can flow at all.
+    try {
+      const first = await characteristic.readValue();
+      console.log("initial read:", new TextDecoder().decode(first));
+      onData({ target: { value: first } });
+    } catch (err) {
+      console.warn("initial read failed:", err);
+    }
 
     dot.classList.add('on');
     statusText.textContent = "Connected";
@@ -329,13 +339,23 @@ function onDisconnected() {
 
 function onData(event) {
   const text = new TextDecoder().decode(event.target.value);
+  console.log("BLE rx:", text);          // see raw packets in DevTools console
   let d;
-  try { d = JSON.parse(text); } catch { return; }
+  try { d = JSON.parse(text); }
+  catch { bannerText.textContent = "Received (not JSON): " + text; return; }
   render(d);
 }
 
 function render(d) {
   switch (d.status) {
+    case "nosensor":
+      bpmEl.textContent = "--";
+      spo2El.textContent = "--";
+      heartEl.classList.remove('beat');
+      barWrap.style.display = "none";
+      bannerText.textContent = "⚠️ Connected, but the MAX30102 sensor isn't detected. Check wiring (VIN→3V3, GND→GND, SDA→D8, SCL→D9).";
+      break;
+
     case "nofinger":
       bpmEl.textContent = "--";
       spo2El.textContent = "--";
@@ -368,6 +388,11 @@ function render(d) {
       }
       pushHistory(d.bpm, d.spo2);
       break;
+
+    default:
+      // Any status the page doesn't recognise -- show it instead of ignoring.
+      bannerText.textContent = "Status: " + d.status +
+        "  (bpm " + d.bpm + ", spo2 " + d.spo2 + ")";
   }
 }
 </script>
